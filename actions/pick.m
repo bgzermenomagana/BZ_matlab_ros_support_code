@@ -1,47 +1,43 @@
-function ret = pick(model_pose)
+function ret = pick(mat_R_T_G, mat_R_T_M)
     %----------------------------------------------------------------------
     % pick 
     % Top-level function to executed a complete pick. 
     % 
-    % 01 Get Goal and Current Pose
+    % 01 
     % 02 
     %
     % Inputs
-    % model_pose (gazebo_msgs/GetModelStateResponse): contains Pose/Twist
-    % info on desired model
+    % mat_R_T_G  [4x4]: gripper pose wrt to base_link
+    % mat_R_T_M [4x4]: object pose wrt to base_link
     %
     % Outputs:
     % ret (bool): indicates whether pick succeeded or not. 
     %----------------------------------------------------------------------
     
-    %% Local variables
-    traj_steps          = 10;   % Num of traj steps
-    traj_duration       = 2;    % Traj duration (secs)
-    tf_listening_time   = 2;    % Time (secs) to listen for transformation in ros
+    %% 1. Local variables
+    debug               = 1;     % If set to true visualize traj before running  
+    traj_steps          = 2;     % Num of traj steps
+    traj_duration       = 2;     % Traj duration (secs)
     
-    %% 1. Get Goal|Current Pose 
-    % Pick will create a cartesian trajectory from current configuration to the pose of the model. 
-    
-    % Convert model_pose to matlab formats.
-    mat_obj_pose = ros2matlabPose(model_pose);
-    
-    % 1b. Current Robot Pose in Cartesian Format:
-    tftree = rostf('DataFormat','struct'); % tftree.AvailableFrames  will show poses for all frames
-
-    % Get gripper_tip_link pose wrt to base via getTransform(tftree,targetframe,sourceframe):
-    %   tftree object
-    %   targetframe: this is your reference frame
-    %   sourceframe: 
-    current_pose = getTransform(tftree,'base','gripper_tip_link',rostime('now'), 'Timeout', 5);
-
-    % Convert to matlab format
-    mat_cur_pose = ros2matlabPose(current_pose);
+    ur5e = loadrobot("universalUR5e",DataFormat="row");   
 
     %% 2. Call ctraj.
-    mat_traj = ctraj(mat_cur_pose,mat_obj_pose,traj_steps);
+    disp('Computing matlab waypoints via ctraj...');
+    mat_traj = ctraj(mat_R_T_G,mat_R_T_M,traj_steps); % Currently unstable due to first ik transformation of joints. Just do one point.
+    %mat_traj = mat_R_T_M;
     
     %% 3. Convert to joint angles via IKs
-    [mat_joint_traj,rob_joint_names] = convertPoseTraj2JointTraj(mat_traj);
+    disp('Converting waypoints to joint angles...');
+    [mat_joint_traj,rob_joint_names] = convertPoseTraj2JointTraj(ur5e,mat_traj);
+
+    %% Visualize trajectory
+    if debug
+        r = rateControl(1);
+        for i = 1:size(mat_joint_traj,1)
+            ur5e.show(mat_joint_traj(i,:),FastUpdate=true,PreservePlot=false);
+            r.waitfor;
+        end
+    end
     
     %% 4. Create action client, message, populate ROS trajectory goal and send
     % Instantiate the 
@@ -52,16 +48,21 @@ function ret = pick(model_pose)
     % Create action goal message from client
     traj_goal = rosmessage(pick_traj_act_client); 
     
-    % Convert/fill in trajectory_msgs/FollowJointTrajectory
-    % TODO: update packTrajGoal
+    % Convert to trajectory_msgs/FollowJointTrajectory
+    disp('Converting to JointTrajectory format...');
     traj_goal = convert2ROSPointVec(mat_joint_traj,rob_joint_names,traj_steps,traj_duration,traj_goal);
-    %traj_goal = ros2matPackTraj(ros_points_traj,traj_goal,rob_joint_names);% TODO: need to get names out
     
     % Finally send ros trajectory with traj_steps
-    [traj_result_msg,traj_result_state] = sendGoal(pick_traj_act_client,traj_goal); 
+    disp('Calling arm client...')
+    sendGoal(pick_traj_act_client,traj_goal); 
+    ret = 0;
+
+    % If you want to cancel the goal, run this command
+    %cancelGoal(pick_traj_act_client);
     
     %% 5. Pick if successfull (check structure of resultState). Otherwise...
-    if traj_result_state
-        [grip_result_msg,grip_result_state] = doGrip('pick'); %%TODO
-    end
+    % if traj_result_state
+    %[grip_result_msg,grip_result_state] = 
+    doGrip('pick'); %%TODO
+    % end
 end

@@ -19,40 +19,61 @@ function traj_goal = convert2ROSPointVec(mat_joint_traj, robot_joint_names, traj
     % Compute timeStep
     timeStep = traj_duration / traj_steps;
     
-
-    traj_goal.Trajectory.JointNames = robot_joint_names;
+    % When we set the names, remove finger entry 2:
+    traj_goal.Trajectory.JointNames = robot_joint_names([1,3:7]);
     
     %% Set Tolerances for each Joint
-    % Create Tolerance Message
-    traj_goal.GoalTolerance = rosmessage('control_msgs/JointTolerance', 'DataFormat','struct');
-    
-    for idx = 1:length(robot_joint_names)
-    % Populate
-        traj_goal.GoalTolerance(idx).Name = traj_goal.Trajectory.JointNames{idx};
-        traj_goal.GoalTolerance(idx).Position = 0;
-        traj_goal.GoalTolerance(idx).Velocity = 0;
-        traj_goal.GoalTolerance(idx).Acceleration = 0;
-    end
+    % % Create Tolerance Message
+    % traj_goal.GoalTolerance = rosmessage('control_msgs/JointTolerance', 'DataFormat','struct');
+    % 
+    % for idx = 1:length(traj_goal.Trajectory.JointNames)
+    % % Populate
+    %     traj_goal.GoalTolerance(idx).Name = traj_goal.Trajectory.JointNames{idx};
+    %     traj_goal.GoalTolerance(idx).Position = 0;
+    %     traj_goal.GoalTolerance(idx).Velocity = 0;
+    %     traj_goal.GoalTolerance(idx).Acceleration = 0;
+    % end
     
     %% Set Points
 
     % Set an array of cells
     points = cell(1,traj_steps);
 
-    % Create Point message
-    point = rosmessage('trajectory_msgs/JointTrajectoryPoint', 'DataFormat','struct');
+    % Set time with format as structure
+    if traj_steps == 1
+        % Create Point message
+        point = rosmessage('trajectory_msgs/JointTrajectoryPoint', 'DataFormat','struct');
+        
+        % Extract each waypoint and set it as a 6x1 (use transpose)
+	    point.Positions     = mat2rosJoints( mat_joint_traj(1, :) )'; 
+        point.TimeFromStart = rosduration(1,'DataFormat','struct');
 
-    for i = 1:traj_steps
-
-        % Extract each waypoint and set it as a 1x6
-	    point.Positions     = mat2rosJoints( mat_joint_traj(i, :) );    
-
-        % Set time with format as structure
-	    point.TimeFromStart = rosduration( (i-1) * timeStep, 'DataFormat','struct');    
-	    
         % Set inside points cell
-        points{i} = point;   
+        points{1} = point; 
+    
+    else
+
+        % Start at 2nd entry such that timeFromStart is not 0 for 1st entry. Does not work well with FollowJointTrajectory type
+        for i = 2:traj_steps
+    
+            % Create Point message
+            point = rosmessage('trajectory_msgs/JointTrajectoryPoint', 'DataFormat','struct');
+    
+            % Extract each waypoint and set it as a 6x1 (use transpose)
+	        point.Positions     = mat2rosJoints( mat_joint_traj(i, :) )';    
+    
+            % Set time with format as structure
+            if traj_steps == 1
+                point.TimeFromStart = rosduration(1,'DataFormat','struct');
+            else
+	            point.TimeFromStart = rosduration( (i-1) * timeStep, 'DataFormat','struct');    
+            end
+            
+            % Set inside points cell
+            points{i} = point;   
+        end
     end
+
     
     traj_goal.Trajectory.Points = [ points{:} ];
 end

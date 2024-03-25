@@ -45,5 +45,5 @@ function matlab_pose = ros2matlabPose(p)
     end
 
     % Build matlab pose
-    matlab_pose = q.T * transl(pos);
+    matlab_pose = transl(pos) * q.T;
 end
